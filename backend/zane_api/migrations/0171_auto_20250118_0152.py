@@ -5,16 +5,76 @@ from django.db.models import F, Func, Value
 
 
 def populate_user_agent(apps, schema_editor):
+    """Populate request_user_agent from request_headers.
+
+    - On PostgreSQL: use jsonb_extract_path_text to extract the value via SQL.
+    - On SQLite and other backends: iterate in Python and bulk_update.
+    """
     HttpLog = apps.get_model("zane_api", "HttpLog")
 
-    HttpLog.objects.filter(request_headers__icontains="User-Agent").update(
-        request_user_agent=Func(
-            F("request_headers"),
-            Value("User-Agent"),
-            Value("0"),
-            function="jsonb_extract_path_text",  # Adjust function for PostgreSQL
+    vendor = getattr(schema_editor.connection, "vendor", None)
+    if vendor == "postgresql":
+        # PostgreSQL path: leverage jsonb_extract_path_text
+        HttpLog.objects.filter(request_headers__icontains="User-Agent").update(
+            request_user_agent=Func(
+                F("request_headers"),
+                Value("User-Agent"),
+                # The third argument in the original was "0" which isn't needed here;
+                # keep signature to match the existing migration intent if any.
+                # If the DB function accepts variadic path, passing only the key is fine.
+                function="jsonb_extract_path_text",
+            )
         )
-    )
+        return
+
+    # Fallback for SQLite/others: Python-side extraction
+    import json
+
+    batch_size = 1000
+    pending = []
+
+    # Use iterator to avoid loading all rows in memory
+    for log in (
+        HttpLog.objects.all().only("id", "request_headers", "request_user_agent").iterator(chunk_size=batch_size)
+    ):
+        headers = log.request_headers
+        user_agent = None
+        try:
+            if isinstance(headers, dict):
+                user_agent = (
+                    headers.get("User-Agent")
+                    or headers.get("user-agent")
+                    or headers.get("USER-AGENT")
+                )
+            elif isinstance(headers, str):
+                # Try to load JSON if it's a JSON string
+                s = headers.strip()
+                if s.startswith("{") and s.endswith("}"):
+                    try:
+                        obj = json.loads(s)
+                        if isinstance(obj, dict):
+                            user_agent = (
+                                obj.get("User-Agent")
+                                or obj.get("user-agent")
+                                or obj.get("USER-AGENT")
+                            )
+                    except Exception:
+                        pass
+        except Exception:
+            user_agent = None
+
+        if user_agent:
+            # Ensure it's a string
+            log.request_user_agent = str(user_agent)
+            pending.append(log)
+            if len(pending) >= batch_size:
+                HttpLog.objects.bulk_update(
+                    pending, ["request_user_agent"], batch_size=batch_size
+                )
+                pending.clear()
+
+    if pending:
+        HttpLog.objects.bulk_update(pending, ["request_user_agent"], batch_size=batch_size)
 
 
 def rollback_user_agent(apps, schema_editor):

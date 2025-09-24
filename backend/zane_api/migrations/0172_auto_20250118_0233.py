@@ -5,23 +5,81 @@ from django.db.models import F, Func, Value
 
 
 def populate_client_ip(apps, schema_editor):
+    """Populate request_ip from X-Forwarded-For header.
+
+    - On PostgreSQL: extract via jsonb_extract_path_text + split_part + inet cast
+    - On SQLite/others: iterate in Python, parse JSON, take the first IP before comma
+    """
     HttpLog = apps.get_model("zane_api", "HttpLog")
 
-    HttpLog.objects.filter(request_headers__icontains="X-Forwarded-For").update(
-        request_ip=Func(
-            Func(
+    vendor = getattr(schema_editor.connection, "vendor", None)
+    if vendor == "postgresql":
+        HttpLog.objects.filter(request_headers__icontains="X-Forwarded-For").update(
+            request_ip=Func(
                 Func(
-                    F("request_headers"),
-                    Value("X-Forwarded-For"),
-                    Value("0"),
-                    function="jsonb_extract_path_text",
+                    Func(
+                        F("request_headers"),
+                        Value("X-Forwarded-For"),
+                        # The extra "0" arg isn't necessary; keep only the key
+                        function="jsonb_extract_path_text",
+                    ),
+                    function="split_part",
+                    template="%(function)s(%(expressions)s, ',', 1)",
                 ),
-                function="split_part",  # PostgreSQL function to split strings
-                template="%(function)s(%(expressions)s, ',', 1)",  # Take the first part before the comma
-            ),
-            function="inet",
+                function="inet",
+            )
         )
-    )
+        return
+
+    # Fallback for SQLite/others: Python-side extraction
+    import json
+
+    batch_size = 1000
+    pending = []
+
+    def extract_first_ip(xff_value: str | list | None) -> str | None:
+        if xff_value is None:
+            return None
+        try:
+            if isinstance(xff_value, list) and len(xff_value) > 0:
+                s = str(xff_value[0])
+            else:
+                s = str(xff_value)
+            first = s.split(",")[0].strip()
+            return first or None
+        except Exception:
+            return None
+
+    for log in (
+        HttpLog.objects.all().only("id", "request_headers", "request_ip").iterator(chunk_size=batch_size)
+    ):
+        headers = log.request_headers
+        xff = None
+        try:
+            if isinstance(headers, dict):
+                xff = headers.get("X-Forwarded-For") or headers.get("x-forwarded-for")
+            elif isinstance(headers, str):
+                s = headers.strip()
+                if s.startswith("{") and s.endswith("}"):
+                    try:
+                        obj = json.loads(s)
+                        if isinstance(obj, dict):
+                            xff = obj.get("X-Forwarded-For") or obj.get("x-forwarded-for")
+                    except Exception:
+                        pass
+        except Exception:
+            xff = None
+
+        ip = extract_first_ip(xff)
+        if ip:
+            log.request_ip = ip
+            pending.append(log)
+            if len(pending) >= batch_size:
+                HttpLog.objects.bulk_update(pending, ["request_ip"], batch_size=batch_size)
+                pending.clear()
+
+    if pending:
+        HttpLog.objects.bulk_update(pending, ["request_ip"], batch_size=batch_size)
 
 
 def rollback_client_ip(apps, schema_editor):

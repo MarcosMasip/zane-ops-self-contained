@@ -103,12 +103,20 @@ if ENVIRONMENT == PRODUCTION_ENV:
     CORS_ALLOWED_ORIGINS = CSRF_TRUSTED_ORIGINS
 
 
-CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.redis.RedisCache",
-        "LOCATION": REDIS_URL,
+if os.environ.get("DISABLE_REDIS", "false").lower() == "true":
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "zaneops-dev-locmem",
+        }
     }
-}
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+        }
+    }
 
 SESSION_ENGINE = "django.contrib.sessions.backends.cache"
 SESSION_EXPIRE_THRESHOLD = 2
@@ -176,18 +184,26 @@ ASGI_APPLICATION = "backend.asgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("DB_NAME", "zane"),
-        "USER": os.environ.get("DB_USER", "postgres"),
-        "PASSWORD": os.environ.get("DB_PASSWORD", "password"),
-        "HOST": os.environ.get("DB_HOST", "127.0.0.1"),
-        "PORT": os.environ.get("DB_PORT", "5434"),
-        "CONN_MAX_AGE": None if ENVIRONMENT == PRODUCTION_ENV else 0,
-        "CONN_HEALTHCHECK": True,
+if os.environ.get("DB_SQLITE", "false").lower() == "true":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": str(BASE_DIR / "db.sqlite3"),
+        }
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.environ.get("DB_NAME", "zane"),
+            "USER": os.environ.get("DB_USER", "postgres"),
+            "PASSWORD": os.environ.get("DB_PASSWORD", "password"),
+            "HOST": os.environ.get("DB_HOST", "127.0.0.1"),
+            "PORT": os.environ.get("DB_PORT", "5434"),
+            "CONN_MAX_AGE": None if ENVIRONMENT == PRODUCTION_ENV else 0,
+            "CONN_HEALTHCHECK": True,
+        }
+    }
 
 # Password validation
 # https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
@@ -414,7 +430,7 @@ try:
 except Exception:
     TEMPORALIO_MAX_CONCURRENT_DEPLOYS = 5
 
-if BACKEND_COMPONENT == "API":
+if BACKEND_COMPONENT == "API" and os.environ.get("DISABLE_PROXY_REGISTRATION", "false").lower() != "true":
     register_zaneops_app_on_proxy(
         proxy_url=CADDY_PROXY_ADMIN_HOST,
         zane_app_domain=ZANE_APP_DOMAIN,

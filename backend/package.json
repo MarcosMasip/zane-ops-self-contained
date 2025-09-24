@@ -5,10 +5,12 @@
   "description": "Backend for ZaneOps",
   "scripts": {
     "dev:api": ". .venv/bin/activate && python manage.py runserver 0.0.0.0:8000",
+    "dev:api:local": "uv sync --locked && . .venv/bin/activate && DB_SQLITE=true DISABLE_REDIS=true DISABLE_PROXY_REGISTRATION=true python manage.py runserver 0.0.0.0:8000",
     "test": ". .venv/bin/activate && python manage.py test --parallel",
     "test:filter": ". .venv/bin/activate && python manage.py test --parallel -k",
     "makemigration": ". .venv/bin/activate && python manage.py makemigrations",
     "migrate": ". .venv/bin/activate && python manage.py migrate",
+  "migrate:sqlite": "uv sync --locked && . .venv/bin/activate && DB_SQLITE=true DISABLE_REDIS=true DISABLE_PROXY_REGISTRATION=true python manage.py migrate",
     "openapi": ". .venv/bin/activate && python manage.py spectacular --color --file ../openapi/schema.yml",
     "lock": ". .venv/bin/activate && uv lock",
     "shell": ". .venv/bin/activate && python manage.py shell -i ipython"

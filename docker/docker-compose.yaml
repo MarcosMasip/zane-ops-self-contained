@@ -22,6 +22,7 @@ services:
       zane:
         aliases:
           - zane.loki
+    profiles: ["extras"]
   grafana:
     image: grafana/grafana:latest
     ports:
@@ -39,6 +40,7 @@ services:
       - grafana-data:/var/lib/grafana
     networks:
       - zane
+    profiles: ["extras"]
   proxy-test:
     image: ghcr.io/zane-ops/proxy:canary
     command: caddy run --resume
@@ -46,35 +48,16 @@ services:
       - "2020:2020"
     environment:
       CADDY_ADMIN: 0.0.0.0:2020
+    profiles: ["extras"]
   temporal-server:
-    entrypoint: ["/etc/temporal/entrypoint.sh"]
-    environment:
-      - DB=postgres12
-      - DB_PORT=5432
-      - POSTGRES_USER=postgres
-      - POSTGRES_PWD=password
-      - POSTGRES_SEEDS=zane.db
-      - SKIP_SCHEMA_SETUP=false
-      - SKIP_DB_SETUP=false
-      - SERVICES=history,matching,frontend,worker
-      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
-      - BIND_ON_IP=0.0.0.0
-    image: temporalio/auto-setup:1.24.2
-    volumes:
-      - ./temporalio/config/dynamicconfig:/etc/temporal/config/dynamicconfig/
-      - ./temporalio/config/config_template.yaml:/etc/temporal/config/config_template.yaml
-      - ./temporalio/entrypoint.sh:/etc/temporal/entrypoint.sh
+    image: temporalio/temporalite:latest
+    command: ["start", "--ip", "0.0.0.0", "--namespace", "zane"]
     networks:
       zane:
         aliases:
           - zane.temporal
     ports:
       - 7233:7233
-    deploy:
-      labels:
-        zane.role: "temporal"
-    depends_on:
-      - db
     restart: always
   api:
     build:
@@ -189,8 +172,10 @@ services:
       - "8081:8080"
     networks:
       - zane
+    profiles: ["extras"]
   redis-gui:
     image: redis/redisinsight
+    profiles: ["extras"]
     container_name: zane-redis-gui
     environment:
       - REDIS_HOSTS=local:redis:6379
@@ -202,6 +187,7 @@ services:
       - zane
   fluentd:
     image: fluentd:v1.16.2-1.1
+    profiles: ["extras"]
     volumes:
       - "./fluentd/fluent.conf:/fluentd/etc/fluent.conf"
       - "$HOME/.fluentd/:/var/fluentd/"

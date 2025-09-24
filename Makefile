@@ -22,8 +22,23 @@ setup: ### Initial setup of the project
 	else \
     	docker network create --attachable --driver overlay --label zane.stack=true zane; \
 	fi
-	python3 -m pip install uv
-	cd backend/ && python3 -m uv sync --locked
+	# Ensure uv is installed without violating PEP 668 (prefer brew/pipx/curl script)
+	@echo 'Ensuring uv is installed...'
+	@if command -v uv >/dev/null 2>&1; then \
+		echo "uv already installed"; \
+	else \
+		if command -v brew >/dev/null 2>&1; then \
+			brew list uv >/dev/null 2>&1 || brew install uv; \
+		elif command -v pipx >/dev/null 2>&1; then \
+			pipx install uv || pipx upgrade uv; \
+		else \
+			echo "Installing uv via install script..."; \
+			curl -LsSf https://astral.sh/uv/install.sh | sh; \
+			export PATH="$$HOME/.local/bin:$$PATH"; \
+		fi; \
+	fi
+	# Use uv to sync the backend virtualenv (uv creates ./backend/.venv)
+	export PATH="$$HOME/.local/bin:$$PATH"; cd backend/ && uv sync --locked
 	echo 'activating the virtualenv...'
 	chmod a+x ./backend/.venv/bin/activate
 	. ./backend/.venv/bin/activate
