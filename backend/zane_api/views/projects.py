@@ -184,7 +184,7 @@ class ProjectsListAPIView(ListCreateAPIView):
             else:
 
                 transaction.on_commit(
-                    lambda: TemporalClient.start_workflow(
+                    lambda: TemporalClient.start_workflow_safe(
                         CreateProjectResourcesWorkflow.run,
                         ProjectDetails(id=new_project.id),
                         id=new_project.create_task_id,
@@ -298,7 +298,7 @@ class ProjectDetailsView(APIView):
             ],
         )
         transaction.on_commit(
-            lambda: TemporalClient.start_workflow(
+            lambda: TemporalClient.start_workflow_safe(
                 RemoveProjectResourcesWorkflow.run,
                 payload,
                 id=archived_version.workflow_id,

@@ -1,6 +1,7 @@
 from datetime import timedelta
 import traceback
 from typing import Any, Awaitable, Callable, List, Optional, Union
+import logging
 
 import temporalio.common
 from temporalio import workflow
@@ -80,6 +81,39 @@ class TemporalClient:
             retry_policy,
             start_delay,
         )
+
+    @classmethod
+    def start_workflow_safe(
+        cls,
+        workflow: Union[str, Callable[..., Awaitable[Any]]],
+        arg: Any,
+        id: str,
+        task_queue=settings.TEMPORALIO_MAIN_TASK_QUEUE,
+        execution_timeout=settings.TEMPORALIO_WORKFLOW_EXECUTION_MAX_TIMEOUT,
+        retry_policy=RetryPolicy(maximum_attempts=1),
+        start_delay: Optional[timedelta] = None,
+    ) -> None:
+        """Start a workflow but swallow connection/Temporal errors.
+
+        Use this when starting workflows from request lifecycle hooks (e.g. transaction.on_commit)
+        so failures to contact Temporal don't break HTTP responses.
+        """
+        try:
+            async_to_sync(cls.astart_workflow)(
+                workflow,
+                arg,
+                id,
+                task_queue,
+                execution_timeout,
+                retry_policy,
+                start_delay,
+            )
+        except Exception as e:
+            logging.getLogger(__name__).warning(
+                "Temporal start_workflow failed for id=%s: %s", id, repr(e)
+            )
+            # Intentionally swallow to avoid bubbling up into HTTP layer
+            return None
 
     @classmethod
     async def astart_workflow(
